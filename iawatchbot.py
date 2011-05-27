@@ -7,6 +7,14 @@ from time import strftime, asctime, altzone, time
 import urllib
 import json
 import os.path
+import smtplib
+
+def send_email(fromaddr, toaddrs, subj, message):
+    msg = ("Subject: %s\r\nFrom: %s\r\nTo: %s\r\n\r\n" % (subj, fromaddr, ", ".join(toaddrs)))
+    msg += message
+    server = smtplib.SMTP('mail.archive.org')
+    server.sendmail(fromaddr, toaddrs, msg)
+    server.quit()
 
 # Make sure only one instance of the bot is running at one time
 if os.path.exists("lock.txt"):
@@ -55,10 +63,12 @@ for y in x:
                 if c.has_key("ocaid"):
                     if c["ocaid"] != d["ocaid"]:
                         g.write("Status: ocaid modified\n")
+                        send_email("daniel.m@archive.org", ["openlibrary@archive.org"], "IA id modified", "The IA id has been modified for the following edition: http://openlibrary.org%s" % z['key'])
                     else:
                         g.write("Status: fine\n")
                 else:
                     g.write("Status: ocaid deleted\n")
+                    send_email("daniel.m@archive.org", ["openlibrary@archive.org"], "IA id deleted", "The IA id has been deleted for the following edition: http://openlibrary.org%s" % z['key'])
             else:
                 g.write("Status: fine\n")
         else:
