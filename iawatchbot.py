@@ -34,7 +34,7 @@ t = asctime()
 s = time()
 
 # Write to the log
-g = open(t, 'w')
+g = open("logs/%s" % t, 'w')
 g.write('Started at time %r\n' % t)
 
 # Query for recent changes
