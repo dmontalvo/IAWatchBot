@@ -10,6 +10,8 @@ import os.path
 import smtplib
 import string
 
+subjlist = ['in library', 'lending library', 'accessible book', 'overdrive', 'protected daisy']
+
 def send_email(fromaddr, toaddrs, subj, message):
     msg = ("Subject: %s\r\nFrom: %s\r\nTo: %s\r\n\r\n" % (subj, fromaddr, ", ".join(toaddrs)))
     msg += message
@@ -36,9 +38,9 @@ s = time()
 
 # Write to the log
 g = open("logs/%s" % t, 'w')
-g.write('Started at time %r\n' % t)
+g.write('Started at: %s\n' % t)
 
-# Get the list of admins
+# Get the whitelist
 k = urllib.urlopen("http://openlibrary.org/usergroup/admin.json")
 l = json.JSONDecoder().decode(k.read())
 whitelist = []
@@ -57,7 +59,7 @@ x = json.JSONDecoder().decode(f.read())
 for y in x:
     if y['id'] <= last_id:
         break
-    g.write("Checking id %r\n" % y['id'])
+    g.write("Checking id: %s\n" % y['id'])
     author = "[None]"
     if y['author'] is not None:
         author = "http://openlibrary.org%s" % y['author']['key']
@@ -67,6 +69,7 @@ for y in x:
         g.write("Status: fine\n")
         continue
     for z in y['changes']:
+        problem = False
         rev = z['revision']
 
         # If it's an edition, check for IA ids
@@ -82,15 +85,13 @@ for y in x:
             if d.has_key("ocaid"):
                 if c.has_key("ocaid"):
                     if c["ocaid"] != d["ocaid"]:
-                        g.write("Status: ocaid modified\n")
-                        send_email("daniel.m@archive.org", ["openlibrary@archive.org"], "IA id modified", "The IA id has been modified by %s for the edition http://openlibrary.org%s with the following comment: '%s'" % (author, z['key'], y['comment']))
-                    else:
-                        g.write("Status: fine\n")
+                        g.write("Status: ocaid modified for %s\n" % z['key'])
+                        problem = True
+                        send_email("daniel.m@archive.org", ["openlibrary@archive.org"], "IA id modified", "The IA id has been modified by %s for the edition http://openlibrary.org%s with the following comment: '%s'" % (author, z['key'], y['comment']))                        
                 else:
-                    g.write("Status: ocaid deleted\n")
+                    g.write("Status: ocaid deleted from %s\n" % z['key'])
+                    problem = True
                     send_email("daniel.m@archive.org", ["openlibrary@archive.org"], "IA id deleted", "The IA id has been deleted by %s for the edition http://openlibrary.org%s with the following comment: '%s'" % (author, z['key'], y['comment']))
-            else:
-                g.write("Status: fine\n")
         elif z['key'][:9] == "/works/OL":
             url = "http://openlibrary.org" + z['key'] + ".json?v=" + str(rev)
             a = urllib.urlopen(url)
@@ -106,17 +107,14 @@ for y in x:
             if d.has_key('subjects'):
                 for subj in d['subjects']:
                     dsubjs.append(string.lower(subj))
-            if d.has_key('subjects') and ("in library" in dsubjs or "lending library" in dsubjs):
-                if c.has_key('subjects') and ("in library" in csubjs or "lending library" in csubjs):
-                    g.write("Status: fine\n")
-                else:
-                    g.write("Status: 'lending/in library' subject deleted\n")
-                    send_email("daniel.m@archive.org", ["openlibrary@archive.org"], "lending/in library subject deleted", "The 'lending library' or 'in library' subject has been deleted by %s for the work http://openlibrary.org%s with the following comment: '%s'" % (author, z['key'], y['comment']))
-            else:
-                g.write("Status: fine\n")
-        else:
-            g.write("Status: fine\n")
-        
+            for subj in subjlist:
+                if d.has_key('subjects') and subj in dsubjs:
+                    if not (c.has_key('subjects') and subj in csubjs):
+                        g.write("Status: %s subject deleted from %s\n" % (subj, z['key']))
+                        problem = True
+                        send_email("daniel.m@archive.org", ["openlibrary@archive.org"], "%s subject deleted" % subj, "The '%s' subject has been deleted by %s for the work http://openlibrary.org%s with the following comment: '%s'" % (subj, author, z['key'], y['comment']))
+        if not problem:
+            g.write("Status: %s fine\n" % z['key'])
 
 # Update the last checked edit
 j = open("lastedit.txt", 'w')
@@ -124,7 +122,7 @@ j.write(x[0]['id'])
 j.close()
 
 # Finish writing to log
-g.write("Ended at time %s\n" % asctime())
-g.write("Total run time = %r seconds\n" % (time() - s))
+g.write("Ended at: %s\n" % asctime())
+g.write("Total run time: %s seconds\n" % (time() - s))
 g.close()
 os.remove("lock.txt")
