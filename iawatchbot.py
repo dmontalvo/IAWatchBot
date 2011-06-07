@@ -85,7 +85,7 @@ try:
                 d = json.JSONDecoder().decode(b.read())
             
                 # if it had an IA id, make sure it wasn't changed/removed
-                if d.has_key("ocaid"):
+                if d.has_key("ocaid") and d['ocaid'] != "":
                     if c.has_key("ocaid"):
                         if c["ocaid"] != d["ocaid"]:
                             g.write("Status: ocaid modified for %s\n" % z['key'])
