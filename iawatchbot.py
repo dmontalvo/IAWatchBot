@@ -20,7 +20,8 @@ def send_email(fromaddr, toaddrs, subj, message):
     msg = ("Subject: %s\r\nFrom: %s\r\nTo: %s\r\n\r\n" % (subj, fromaddr, ", ".join(toaddrs)))
     msg += message
     server = smtplib.SMTP('mail.archive.org')
-    server.sendmail(fromaddr, toaddrs, msg)
+    #server.sendmail(fromaddr, toaddrs, msg)
+    server.sendmail(fromaddr, ["daniel.m@archive.org"], msg)
     server.quit()
 
 def bad_links(before, after):
@@ -30,8 +31,8 @@ def bad_links(before, after):
     prevbadlinks = len(re.findall("http://", bef)) - len(re.findall("loc.gov", bef)) - len(re.findall("wikipedia.org", bef)) - len(re.findall("archive.org", bef)) - len(re.findall("openlibrary.org", bef))
     return badlinks - prevbadlinks > 2
 
-def insert(linenum, key, author, problem, comment):
-    stuff = (linenum, key, author, problem, comment, 0)
+def insert(time, key, author, comment, problem):
+    stuff = (time, key, author, comment, problem, 0)
     curs.execute("""insert into vandalism values (?, ?, ?, ?, ?, ?)""", stuff)
     conn.commit()
 
@@ -50,8 +51,11 @@ try:
     global curs
     conn = sqlite3.connect('/home/dmontalvo/IAWatchBot/reports.sqlite')
     curs = conn.cursor()
-    curs.execute("""select * from vandalism""")
-    linenum = len(curs.fetchall()) + 1
+    curs.execute("""select * from vandalism where resolved=0""")
+    #if s % 86400 < 60 or s % 86400 > 86340:
+    unresolved = len(curs.fetchall())
+    #if unresolved > 0:
+    send_email("daniel.m@archive.org", ["openlibrary@archive.org"], "Unresolved Vandalism Reports", 'There are %s unresolved vandalism reports. To resolve them, visit the Vandalism Center: http://ol-bots.us.archive.org/cgi-bin/vandalismcenter.py' % unresolved)
 
     # Find the last checked edit
     if os.path.exists("lastedit.txt"):
@@ -115,21 +119,18 @@ try:
                         if c["ocaid"] != d["ocaid"]:
                             g.write("Status: ocaid modified for %s\n" % z['key'])
                             problem = True
-                            #send_email("daniel.m@archive.org", ["openlibrary@archive.org"], "IA id modified", "The IA id has been modified by %s for the edition http://openlibrary.org%s with the following comment: '%s'" % (author, z['key'], y['comment']))   
-                            insert(linenum, z['key'], auth, "IA id modified", y['comment'])
-                            linenum += 1
+                            send_email("daniel.m@archive.org", ["openlibrary@archive.org"], "IA id modified", "The IA id has been modified by %s for the edition http://openlibrary.org%s with the following comment: '%s'" % (author, z['key'], y['comment']))   
+                            insert(y['timestamp'], z['key'], auth, y['comment'], "IA id modified")
                     else:
                         g.write("Status: ocaid deleted from %s\n" % z['key'])
                         problem = True
-                        #send_email("daniel.m@archive.org", ["openlibrary@archive.org"], "IA id deleted", "The IA id has been deleted by %s for the edition http://openlibrary.org%s with the following comment: '%s'" % (author, z['key'], y['comment']))
-                        insert(linenum, z['key'], auth, "IA id deleted", y['comment'])
-                        linenum += 1
+                        send_email("daniel.m@archive.org", ["openlibrary@archive.org"], "IA id deleted", "The IA id has been deleted by %s for the edition http://openlibrary.org%s with the following comment: '%s'" % (author, z['key'], y['comment']))
+                        insert(y['timestamp'], z['key'], auth, y['comment'], "IA id deleted")
                 if not problem and bad_links(d, c):
                     problem = True
                     g.write("Status: spam added to %s\n" % z['key'])
-                    #send_email("daniel.m@archive.org", ["openlibrary@archive.org"], "Possible spam detected", "Suspicious links have been added by %s for the edition http://openlibrary.org%s with the following comment: '%s'" % (author, z['key'], y['comment']))
-                    insert(linenum, z['key'], auth, "untrusted links", y['comment'])
-                    linenum += 1
+                    send_email("daniel.m@archive.org", ["openlibrary@archive.org"], "Possible spam detected", "Suspicious links have been added by %s for the edition http://openlibrary.org%s with the following comment: '%s'" % (author, z['key'], y['comment']))
+                    insert(y['timestamp'], z['key'], auth, y['comment'], "untrusted links")
             elif z['key'][:9] == "/works/OL":
                 url = "http://openlibrary.org" + z['key'] + ".json?v=" + str(rev)
                 a = urllib.urlopen(url)
@@ -153,15 +154,13 @@ try:
                             problem = True
                             removedlist.append(subj)
                 if len(removedlist) > 0:
-                    #send_email("daniel.m@archive.org", ["openlibrary@archive.org"], "Protected subject(s) deleted", "Protected subjects %s have been deleted by %s for the work http://openlibrary.org%s with the following comment: '%s'" % (removedlist, author, z['key'], y['comment']))
-                    insert(linenum, z['key'], auth, "subjects deleted", y['comment'])
-                    linenum += 1
+                    send_email("daniel.m@archive.org", ["openlibrary@archive.org"], "Protected subject(s) deleted", "Protected subjects %s have been deleted by %s for the work http://openlibrary.org%s with the following comment: '%s'" % (removedlist, author, z['key'], y['comment']))
+                    insert(y['timestamp'], z['key'], auth, y['comment'], "subjects deleted")
                 if not problem and bad_links(d, c):
                     problem = True
                     g.write("Status: spam added to %s\n" % z['key'])
-                    #send_email("daniel.m@archive.org", ["openlibrary@archive.org"], "Possible spam detected", "Suspicious links have been added by %s for the work http://openlibrary.org%s with the following comment: '%s'" % (author, z['key'], y['comment']))
-                    insert(linenum, z['key'], auth, "untrusted links", y['comment'])
-                    linenum += 1
+                    send_email("daniel.m@archive.org", ["openlibrary@archive.org"], "Possible spam detected", "Suspicious links have been added by %s for the work http://openlibrary.org%s with the following comment: '%s'" % (author, z['key'], y['comment']))
+                    insert(y['timestamp'], z['key'], auth, y['comment'], "untrusted links")
             if not problem:
                 g.write("Status: %s fine\n" % z['key'])
 
