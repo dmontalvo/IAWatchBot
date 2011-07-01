@@ -3,7 +3,9 @@
 # IAWatchBot                                                                 
 # by Daniel Montalvo    
 
-from time import asctime, time
+from time import asctime, time, ctime
+import time
+import calendar
 import urllib
 import json
 import os.path
@@ -33,6 +35,7 @@ def bad_links(before, after):
 def insert(time, key, title, author, comment, revision, problem):
     curs.execute("insert into reports (time, key, title, author, comment, revision, problem, resolved) values (%s, %s, %s, %s, %s, %s, %s, %s)", (time, key, title, author, comment, revision, problem, 0))
     conn.commit()
+
 # Make sure only one instance of the bot is running at one time
 if os.path.exists("iawb_lock.txt"):
     print "Bot already running. Exiting."
@@ -40,7 +43,7 @@ if os.path.exists("iawb_lock.txt"):
 i = open("iawb_lock.txt", 'w')
 
 t = asctime()
-s = time()
+s = time.time()
 
 try:
     # Connect to database
@@ -164,6 +167,37 @@ try:
                     problem = True
                     logstring += "Status: spam added to %s\n" % z['key']
                     insert(y['timestamp'], z['key'], title, auth, y['comment'], rev, "untrusted links")
+            # Check for removed fields
+            if ("/works/" in z['key'] or "/books/" in z['key']) and z['revision'] > 1 and not problem:
+               url1 = "http://openlibrary.org%s.json?v=%s" % (z['key'], z['revision'])     
+               a = urllib.urlopen(url1)
+               b = json.JSONDecoder().decode(a.read())
+               url2 = "http://openlibrary.org%s.json?v=%s" % (z['key'], z['revision'] - 1)
+               c = urllib.urlopen(url2)
+               d = json.JSONDecoder().decode(c.read())
+               removedfields = []
+               for field in d:
+                   if field == 'id':
+                       continue
+                   if d[field] != "" and d[field] != [] and d[field] != {} and not b.has_key(field):
+                       removedfields.append(field)
+                       if not problem:
+                           try:
+                               t1 = time.strptime(d['last_modified']['value'], '%Y-%m-%dT%H:%M:%S.%f')
+                           except ValueError:
+                               t1 = time.strptime(d['last_modified']['value'], '%Y-%m-%d %H:%M:%S.%f')
+                           try:
+                               t2 = time.strptime(b['last_modified']['value'], '%Y-%m-%dT%H:%M:%S.%f')
+                           except ValueError:
+                               t2 = time.strptime(b['last_modified']['value'], '%Y-%m-%d %H:%M:%S.%f')
+                           t3 = calendar.timegm(t1)
+                           t4 = calendar.timegm(t2)
+                           lastedit = t3 - t4
+                           if lastedit > 600 or lastedit < -600:
+                               problem = True
+               if problem:
+                   logstring += "Status: fields %s removed from %s\n" % (removedfields, z['key'])
+                   insert(y['timestamp'], z['key'], title, auth, y['comment'], rev, "fields removed")
             if not problem:
                 logstring += "Status: %s fine\n" % z['key']
 
@@ -187,7 +221,7 @@ try:
 
     # Finish writing to log
     logstring += "Ended at: %s\n" % asctime()
-    logstring += "Total run time: %s seconds\n" % (time() - s)
+    logstring += "Total run time: %s seconds\n" % (time.time() - s)
     curs.execute("insert into logs (time, bot, logtype, data) values (%s, 'iawatchbot', 'logs', %s)", (t, logstring))
     conn.commit()
     os.remove("iawb_lock.txt")
