@@ -15,6 +15,9 @@ import traceback
 import sys
 import re
 import psycopg2
+import language
+
+ld = language.LangDetect()
 
 subjlist = ['in library', 'lending library', 'accessible book', 'overdrive', 'protected daisy']
 
@@ -42,6 +45,7 @@ if os.path.exists("iawb_lock.txt"):
     exit()
 i = open("iawb_lock.txt", 'w')
 
+# Get start time
 t = asctime()
 s = time.time()
 
@@ -69,21 +73,21 @@ try:
     logstring = 'Started at: %s\n' % t
 
     # Get the whitelist
-    k = urllib.urlopen("http://openlibrary.org/usergroup/admin.json")
-    l = json.JSONDecoder().decode(k.read())
+    adminquery = urllib.urlopen("http://openlibrary.org/usergroup/admin.json")
+    l = json.JSONDecoder().decode(adminquery.read())
     whitelist = []
     adminlist = []
     for member in l['members']:
         whitelist.append(member['key'])
         adminlist.append(member['key'])
-    m = urllib.urlopen("http://openlibrary.org/usergroup/api.json")
-    n = json.JSONDecoder().decode(m.read())
+    apiquery = urllib.urlopen("http://openlibrary.org/usergroup/api.json")
+    n = json.JSONDecoder().decode(apiquery.read())
     for member in n['members']:
         whitelist.append(member['key'])
 
     # Query for recent changes
-    f = urllib.urlopen("http://openlibrary.org/recentchanges.json?limit=1000")
-    x = json.JSONDecoder().decode(f.read())
+    changesquery = urllib.urlopen("http://openlibrary.org/recentchanges.json?limit=1000")
+    x = json.JSONDecoder().decode(changesquery.read())
 
     # Iterate over the recent changes
     for y in x:
@@ -100,86 +104,75 @@ try:
             auth = y['ip']
         if y['author'] is not None and auth in whitelist:
             logstring += "Status: fine\n"
+
             # Automatically resolve if admin edited
             if auth in adminlist:
                 for z in y['changes']:
-                    if z['key'] in keylist:
+                    if key in keylist:
                         curs.execute("""update reports set resolved=1 where key=%s""", (z['key'],))
                         conn.commit()
             continue
+
+        # Iterate over each item in each change
         for z in y['changes']:
             problem = False
             rev = z['revision']
-            title = z['key']
+            key = z['key']
+            title = key
+            currenturl = urllib.urlopen("http://openlibrary.org" + key + ".json?v=" + str(rev))
+            currentitem = json.JSONDecoder().decode(currenturl.read())
+            if rev > 1:
+                previousurl = urllib.urlopen("http://openlibrary.org" + key + ".json?v=" + str(rev-1))
+                previousitem = json.JSONDecoder().decode(previousurl.read())
+            if currentitem.has_key('title'):
+                title = currentitem['title']
 
             # If it's an edition, check for IA ids
-            if z['key'][:9] == "/books/OL":
-                url = "http://openlibrary.org" + z['key'] + ".json?v=" + str(rev)
-                a = urllib.urlopen(url)
-                url = "http://openlibrary.org" + z['key'] + ".json?v=" + str(rev-1)
-                b = urllib.urlopen(url)
-                c = json.JSONDecoder().decode(a.read())
-                d = json.JSONDecoder().decode(b.read())
-                if c.has_key('title'):
-                    title = c['title']            
+            if "/books/" in key and rev > 1:
+                if currentitem.has_key('title'):
+                    title = currentitem['title']            
+
                 # if it had an IA id, make sure it wasn't changed/removed
-                if d.has_key("ocaid") and d['ocaid'] != "":
-                    if c.has_key("ocaid"):
-                        if c["ocaid"] != d["ocaid"]:
-                            logstring += "Status: ocaid modified for %s\n" % z['key']
+                if previousitem.has_key("ocaid") and previousitem['ocaid'] != "":
+                    if currentitem.has_key("ocaid"):
+                        if currentitem["ocaid"] != previousitem["ocaid"]:
+                            logstring += "Status: ocaid modified for %s\n" % key
                             problem = True
-                            insert(y['timestamp'], z['key'], title, auth, y['comment'], rev, "IA id modified")
+                            insert(y['timestamp'], key, title, auth, y['comment'], rev, "IA id modified")
                     else:
-                        logstring += "Status: ocaid deleted from %s\n" % z['key']
+                        logstring += "Status: ocaid deleted from %s\n" % key
                         problem = True
-                        insert(y['timestamp'], z['key'], title, auth, y['comment'], rev, "IA id deleted")
-                if not problem and bad_links(d, c):
-                    problem = True
-                    logstring += "Status: spam added to %s\n" % z['key']
-                    insert(y['timestamp'], z['key'], title, auth, y['comment'], rev, "untrusted links")
-            elif z['key'][:9] == "/works/OL":
-                url = "http://openlibrary.org" + z['key'] + ".json?v=" + str(rev)
-                a = urllib.urlopen(url)
-                url = "http://openlibrary.org" + z['key'] + ".json?v=" + str(rev-1)
-                b = urllib.urlopen(url)
-                c = json.JSONDecoder().decode(a.read())
-                d = json.JSONDecoder().decode(b.read())
-                if c.has_key('title'):
-                    title = c['title']
+                        insert(y['timestamp'], key, title, auth, y['comment'], rev, "IA id deleted")
+
+            # Check works for deleted subjects
+            elif "/works/" in key and rev > 1:
+                if currentitem.has_key('title'):
+                    title = currentitem['title']
                 csubjs = []
-                if c.has_key('subjects'):
-                    for subj in c['subjects']:
+                if currentitem.has_key('subjects'):
+                    for subj in currentitem['subjects']:
                         csubjs.append(string.lower(subj))
                 dsubjs = []
-                if d.has_key('subjects'):
-                    for subj in d['subjects']:
+                if previousitem.has_key('subjects'):
+                    for subj in previousitem['subjects']:
                         dsubjs.append(string.lower(subj))
                 removedlist = []
                 for subj in subjlist:
-                    if d.has_key('subjects') and subj in dsubjs:
-                        if not (c.has_key('subjects') and subj in csubjs):
-                            logstring += "Status: %s subject deleted from %s\n" % (subj, z['key'])
+                    if previousitem.has_key('subjects') and subj in dsubjs:
+                        if not (currentitem.has_key('subjects') and subj in csubjs):
+                            logstring += "Status: %s subject deleted from %s\n" % (subj, key)
                             problem = True
                             removedlist.append(subj)
                 if len(removedlist) > 0:
-                    insert(y['timestamp'], z['key'], title, auth, y['comment'], rev, "subjects deleted")
-                if not problem and bad_links(d, c):
-                    problem = True
-                    logstring += "Status: spam added to %s\n" % z['key']
-                    insert(y['timestamp'], z['key'], title, auth, y['comment'], rev, "untrusted links")
+                    insert(y['timestamp'], key, title, auth, y['comment'], rev, "subjects deleted")
+
             # Check for removed fields
-            if ("/works/" in z['key'] or "/books/" in z['key']) and z['revision'] > 1 and not problem:
-               url1 = "http://openlibrary.org%s.json?v=%s" % (z['key'], z['revision'])     
-               a = urllib.urlopen(url1)
-               b = json.JSONDecoder().decode(a.read())
-               url2 = "http://openlibrary.org%s.json?v=%s" % (z['key'], z['revision'] - 1)
-               c = urllib.urlopen(url2)
-               d = json.JSONDecoder().decode(c.read())
+            if ("/works/" in key or "/books/" in key) and rev > 1 and not problem:
                removedfields = []
-               for field in d:
+               for field in previousitem:
                    if field == 'id':
                        continue
-                   if d[field] != "" and d[field] != [] and d[field] != {} and not b.has_key(field):
+                   if previousitem[field] != "" and previousitem[field] != [] and previousitem[field] != {} and not currentitem.has_key(field):
                        removedfields.append(field)
                        if not problem:
                            try:
@@ -196,10 +189,41 @@ try:
                            if lastedit > 600 or lastedit < -600:
                                problem = True
                if problem:
-                   logstring += "Status: fields %s removed from %s\n" % (removedfields, z['key'])
-                   insert(y['timestamp'], z['key'], title, auth, y['comment'], rev, "fields removed")
+                   logstring += "Status: fields %s removed from %s\n" % (removedfields, key)
+                   insert(y['timestamp'], key, title, auth, y['comment'], rev, "fields removed")
+
+            # Check for suspicious links
+            if (not problem) and ('/works/' in key or '/books/' in key) and bad_links(previousitem, currentitem):
+                    problem = True
+                    logstring += "Status: spam added to %s\n" % key
+                    insert(y['timestamp'], key, title, auth, y['comment'], rev, "untrusted links")
+
+            # Check for language change in title or description
+            if (not problem) and ('/works/' in key or '/books/' in key) and rev > 1:
+                curlang = ld.detect(currentitem['title'])
+                if curlang != "en":
+                    prevlang = ld.detect(previousitem['title'])
+                    if curlang != prevlang:
+                        problem = True
+                        logstring += "Status: language change in title of %s\n" % key
+                        insert(y['timestamp'], key, title, auth, y['comment'], rev, "language change in title")
+                if not problem and previousitem.has_key('description'):
+                    if type(currentitem['description']) == dict and currentitem['description'].has_key('value'):
+                        curlang = ld.detect(currentitem['description']['value'])
+                    else:
+                        curlang = ld.detect(currentitem['description'])
+                    if curlang != "en" and previousitem.has_key('description'):
+                        if type(previousitem['description']) == dict and previousitem['description'].has_key('value'):
+                            prevlang = ld.detect(previousitem['description']['value'])
+                        else:
+                            prevlang = ld.detect(previousitem['description'])
+                        if curlang != prevlang:
+                            problem = True
+                            logstring += "Status: language change in description of %s\n" % key
+                            insert(y['timestamp'], key, title, auth, y['comment'], rev, "language change in description")
+
             if not problem:
-                logstring += "Status: %s fine\n" % z['key']
+                logstring += "Status: %s fine\n" % key
 
     # Check for unresolved reports once per day
     curs.execute("""select * from reports where resolved=0""")
