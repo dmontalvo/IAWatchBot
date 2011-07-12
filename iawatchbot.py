@@ -29,10 +29,12 @@ def send_email(fromaddr, toaddrs, subj, message):
     server.quit()
 
 def bad_links(before, after):
-    bef = str(before)
-    aft = str(after)
+    aft = str(after)    
     badlinks = len(re.findall("http://", aft)) - len(re.findall("loc.gov", aft)) - len(re.findall("wikipedia.org", aft)) - len(re.findall("archive.org", aft)) - len(re.findall("openlibrary.org", aft))
-    prevbadlinks = len(re.findall("http://", bef)) - len(re.findall("loc.gov", bef)) - len(re.findall("wikipedia.org", bef)) - len(re.findall("archive.org", bef)) - len(re.findall("openlibrary.org", bef))
+    prevbadlinks = 0
+    if before is not None:
+        bef = str(before)
+        prevbadlinks = len(re.findall("http://", bef)) - len(re.findall("loc.gov", bef)) - len(re.findall("wikipedia.org", bef)) - len(re.findall("archive.org", bef)) - len(re.findall("openlibrary.org", bef))
     return badlinks - prevbadlinks > 2
 
 def insert(time, key, title, author, comment, revision, problem):
@@ -108,7 +110,7 @@ try:
             # Automatically resolve if admin edited
             if auth in adminlist:
                 for z in y['changes']:
-                    if key in keylist:
+                    if z['key'] in keylist:
                         curs.execute("""update reports set resolved=1 where key=%s""", (z['key'],))
                         conn.commit()
             continue
@@ -119,8 +121,12 @@ try:
             rev = z['revision']
             key = z['key']
             title = key
-            currenturl = urllib.urlopen("http://openlibrary.org" + key + ".json?v=" + str(rev))
-            currentitem = json.JSONDecoder().decode(currenturl.read())
+            try:
+                currenturl = urllib.urlopen("http://openlibrary.org" + key + ".json?v=" + str(rev))
+                currentitem = json.JSONDecoder().decode(currenturl.read())
+            except ValueError:
+                continue
+            previousitem = None
             if rev > 1:
                 previousurl = urllib.urlopen("http://openlibrary.org" + key + ".json?v=" + str(rev-1))
                 previousitem = json.JSONDecoder().decode(previousurl.read())
@@ -176,13 +182,13 @@ try:
                        removedfields.append(field)
                        if not problem:
                            try:
-                               t1 = time.strptime(d['last_modified']['value'], '%Y-%m-%dT%H:%M:%S.%f')
+                               t1 = time.strptime(previousitem['last_modified']['value'], '%Y-%m-%dT%H:%M:%S.%f')
                            except ValueError:
-                               t1 = time.strptime(d['last_modified']['value'], '%Y-%m-%d %H:%M:%S.%f')
+                               t1 = time.strptime(previousitem['last_modified']['value'], '%Y-%m-%d %H:%M:%S.%f')
                            try:
-                               t2 = time.strptime(b['last_modified']['value'], '%Y-%m-%dT%H:%M:%S.%f')
+                               t2 = time.strptime(currentitem['last_modified']['value'], '%Y-%m-%dT%H:%M:%S.%f')
                            except ValueError:
-                               t2 = time.strptime(b['last_modified']['value'], '%Y-%m-%d %H:%M:%S.%f')
+                               t2 = time.strptime(currentitem['last_modified']['value'], '%Y-%m-%d %H:%M:%S.%f')
                            t3 = calendar.timegm(t1)
                            t4 = calendar.timegm(t2)
                            lastedit = t3 - t4
