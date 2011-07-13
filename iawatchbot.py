@@ -206,14 +206,15 @@ try:
 
             # Check for language change in title or description
             if (not problem) and ('/works/' in key or '/books/' in key) and rev > 1:
-                curlang = ld.detect(currentitem['title'])
-                if curlang != "en":
-                    prevlang = ld.detect(previousitem['title'])
-                    if curlang != prevlang:
-                        problem = True
-                        logstring += "Status: language change in title of %s\n" % key
-                        insert(y['timestamp'], key, title, auth, y['comment'], rev, "language change in title")
-                if not problem and previousitem.has_key('description'):
+                if currentitem.has_key('title') and previousitem.has_key('title'):
+                    curlang = ld.detect(currentitem['title'])
+                    if curlang != "en":
+                        prevlang = ld.detect(previousitem['title'])
+                        if curlang != prevlang:
+                            problem = True
+                            logstring += "Status: language change in title of %s\n" % key
+                            insert(y['timestamp'], key, title, auth, y['comment'], rev, "language change in title")
+                if not problem and previousitem.has_key('description') and currentitem.has_key('description'):
                     if type(currentitem['description']) == dict and currentitem['description'].has_key('value'):
                         curlang = ld.detect(currentitem['description']['value'])
                     else:
