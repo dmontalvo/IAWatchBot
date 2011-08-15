@@ -12,7 +12,6 @@ import os.path
 import smtplib
 import string
 import traceback
-import sys
 import re
 import psycopg2
 import language
@@ -235,7 +234,7 @@ try:
     # Check for unresolved reports once per day
     curs.execute("""select * from reports where resolved=0""")
     num_unresolved = len(curs.fetchall())
-    if num_unresolved > 0 and (s % 86400 < 60 or s % 86400 > 86340):
+    if num_unresolved > 0 and (s % 86400 < 61260 and s % 86400 > 61140):
         verb = "are"
         noun = "reports"
         pronoun = "them"
