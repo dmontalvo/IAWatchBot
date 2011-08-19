@@ -4,13 +4,13 @@ from time import time, ctime
 import os
 
 running1 = "No"
-if os.path.exists("/home/dmontalvo/iawb_lock.txt"):
+if os.path.exists("/home/rkumar/iawb_lock.txt"):
     running1 = "Yes"
 running2 = "No"
-if os.path.exists("/home/dmontalvo/nytb_lock.txt"):
+if os.path.exists("/home/rkumar/nytb_lock.txt"):
     running2 = "Yes"
 running3 = "No"
-if os.path.exists("/home/dmontalvo/pubbot_lock.txt"):
+if os.path.exists("/home/rkumar/pubbot_lock.txt"):
     running3 = "Yes"
 
 zoneoffset = 25200
